@@ -1,6 +1,6 @@
 #pragma semicolon 1
 
-#define PLUGIN_VERSION "1.2.0"
+#define PLUGIN_VERSION "1.4.0"
 
 #include <sourcemod>
 #include <tf2>
@@ -17,15 +17,39 @@ public Plugin myinfo =
 	url = ""
 };
 
-bool bHasHomingProjectiles[MAXPLAYERS+1], bHasHomingHead[MAXPLAYERS+1], bHasHomingFeet[MAXPLAYERS+1];
-ArrayList hArrayHomingProjectile = null;
-
-ConVar hEnable, hCanSeeEveryone, hHomingProjectilesMod, hHomingHead, hHomingFeet;
-bool bEnable, bCanSeeEveryone, bHomingHead, bHomingFeet;
+bool		bHasHomingProjectiles[MAXPLAYERS+1], 
+		bHasHomingHead[MAXPLAYERS+1], 
+		bHasHomingFeet[MAXPLAYERS+1];
+		
+/*******FOR CONSOLE VARIABLES*******/
+ConVar	hEnable, 
+		hHomingForAll, 
+		hHomingForAllHead, 
+		hHomingForAllFeet, 
+		hCanSeeEveryone, 
+		hHomingProjectilesMod, 
+		hHomingHead, 
+		hHomingFeet, 
+		hHomingSpeed, 
+		hHomingReflectSpeed;
+		
+bool		bEnable, 
+		bHomingForAll, 
+		bHomingForAllHead, 
+		bHomingForAllFeet, 
+		bCanSeeEveryone, 
+		bHomingHead, 
+		bHomingFeet;
+		
+float		HOMING_SPEED_MULTIPLIER = 0.5, 
+		HOMING_AIRBLAST_MULTIPLIER = 1.1;
+/**********************************************/
+		
+/*#define HOMING_SPEED_MULTIPLIER 0.5		UPDATED !!!!!!
+#define HOMING_AIRBLAST_MULTIPLIER 1.1*/	
+	
 int iHomingProjectilesMod;
-
-#define HOMING_SPEED_MULTIPLIER 0.5
-#define HOMING_AIRBLAST_MULTIPLIER 1.1
+ArrayList hArrayHomingProjectile = null;
 
 #define HOMING_NONE 0
 #define HOMING_SELF (1 << 0) // rocket's owner					index : 1
@@ -34,7 +58,39 @@ int iHomingProjectilesMod;
 #define HOMING_FRIENDLIES (1 << 3) // friendlies of owner			index : 8
 #define HOMING_SMOOTH (1 << 4) // smooths the turning			index : 16
 
+Handle	hHLookupBone, 
+		hHGetBonePosition;
+
 public void OnPluginStart()
+{
+	RegisterCmds();
+	RegisterCvars();
+	
+	AutoExecConfig(true, "HomingProjectiles");
+	
+	HookEvent("teamplay_round_start", RoundStart);
+	
+	LoadTranslations("common.phrases");
+	
+	/////////////////////////////////////////////****TAKEN FROM A PELIPOIKA'S PLUGIN****////////////////////////////////////////////
+	//int CBaseAnimating::LookupBone( const char *szName )
+	StartPrepSDKCall(SDKCall_Entity);
+	PrepSDKCall_SetSignature(SDKLibrary_Server, "\x55\x8B\xEC\x56\x8B\xF1\x80\xBE\x41\x03\x00\x00\x00\x75\x2A\x83\xBE\x6C\x04\x00\x00\x00\x75\x2A\xE8\x2A\x2A\x2A\x2A\x85\xC0\x74\x2A\x8B\xCE\xE8\x2A\x2A\x2A\x2A\x8B\x86\x6C\x04\x00\x00\x85\xC0\x74\x2A\x83\x38\x00\x74\x2A\xFF\x75\x08\x50\xE8\x2A\x2A\x2A\x2A\x83\xC4\x08\x5E", 68);
+	PrepSDKCall_AddParameter(SDKType_String, SDKPass_Pointer);
+	PrepSDKCall_SetReturnInfo(SDKType_PlainOldData, SDKPass_Plain);
+	if ((hHLookupBone = EndPrepSDKCall()) == INVALID_HANDLE) SetFailState("Failed to create SDKCall for CBaseAnimating::LookupBone signature!");
+	
+	//void CBaseAnimating::GetBonePosition ( int iBone, Vector &origin, QAngle &angles )
+	StartPrepSDKCall(SDKCall_Entity);
+	PrepSDKCall_SetSignature(SDKLibrary_Server, "\x55\x8B\xEC\x83\xEC\x30\x56\x8B\xF1\x80\xBE\x41\x03\x00\x00\x00", 16);
+	PrepSDKCall_AddParameter(SDKType_PlainOldData, SDKPass_Plain);
+	PrepSDKCall_AddParameter(SDKType_Vector, SDKPass_ByRef, _, VENCODE_FLAG_COPYBACK);
+	PrepSDKCall_AddParameter(SDKType_QAngle, SDKPass_ByRef, _, VENCODE_FLAG_COPYBACK);
+	if ((hHGetBonePosition = EndPrepSDKCall()) == INVALID_HANDLE) SetFailState("Failed to create SDKCall for CBaseAnimating::GetBonePosition signature!");
+	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+}
+
+void RegisterCmds()
 {
 	RegAdminCmd("sm_homingprojectiles", Command_HomingProjectiles, ADMFLAG_SLAY, "Toggle Homing Projectiles");
 	RegAdminCmd("sm_homing", Command_HomingProjectiles, ADMFLAG_SLAY, "Toggle Homing Projectiles");
@@ -45,10 +101,24 @@ public void OnPluginStart()
 	RegAdminCmd("sm_homingrocketfeet", Command_HomingFeet, ADMFLAG_SLAY, "Toggle Homing Rocket to target feet");
 	RegAdminCmd("sm_homingfeet", Command_HomingFeet, ADMFLAG_SLAY, "Toggle Homing Rocket to target feet");
 	
+	RegAdminCmd("sm_homingremoveall", Command_HomingRemoveAll, ADMFLAG_SLAY, "Remove All Homing Projectiles");
+}
+
+void RegisterCvars()
+{
 	CreateConVar("sm_homingprojectiles_version", PLUGIN_VERSION, "[TF2] Homing Projectiles Version", FCVAR_NOTIFY | FCVAR_SPONLY);
 	
 	hEnable = CreateConVar("sm_homingprojectiles_enable", "1", "Enable/Disable \"Homing Projectiles\" Plugin", FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	hEnable.AddChangeHook(ConVarChanged);
+	
+	hHomingForAll = CreateConVar("sm_homingprojectiles_all", "0", "Enable/Disable Homing Projectiles for all", FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	hHomingForAll.AddChangeHook(ConVarChanged);
+	
+	hHomingForAllHead = CreateConVar("sm_homingprojectiles_allhead", "0", "Enable/Disable Homing Arrow Head for all", FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	hHomingForAllHead.AddChangeHook(ConVarChanged);
+	
+	hHomingForAllFeet = CreateConVar("sm_homingprojectiles_allfeet", "0", "Enable/Disable Homing Rocket Feet for all", FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	hHomingForAllFeet.AddChangeHook(ConVarChanged);
 	
 	hCanSeeEveryone = CreateConVar("sm_homingprojectiles_canseeeveryone", "0", "If projectiles can attack/see invisible/disguised spies", FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	hCanSeeEveryone.AddChangeHook(ConVarChanged);
@@ -56,31 +126,33 @@ public void OnPluginStart()
 	hHomingProjectilesMod = CreateConVar("sm_homingprojectiles_mod", "4", "Homing Projectiles Mod ||| 0 - No Mod (no Homing Projectiles)\n1 - Target the owner\n2 - Target the real owner (for example if pyro airblast the proj. , it's the real owner and not the pyro will get the proj.)\n4 - Target enemies\n8 - Target allies\n16 - Smooth Rocket Movements (Useless alone. Also, the rocket will lose a little his precision)\nYou can have more than 1 mod by adding the value(example : 20 = 16 + 4 = Target enemies + Smooth Rocket Movements)", FCVAR_NOTIFY, true, 0.0, true, 31.0);
 	hHomingProjectilesMod.AddChangeHook(ConVarChanged);
 	
-	hHomingHead = CreateConVar("sm_homingprojectiles_head", "1", "Homing Arrow Head ||| 1 - Enable || 0 - Disable", FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	hHomingHead = CreateConVar("sm_homingprojectiles_head", "1", "Enable/Disable command that toggle Homing Arrow Head ", FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	hHomingHead.AddChangeHook(ConVarChanged);
 	
-	hHomingFeet = CreateConVar("sm_homingprojectiles_feet", "1", "Homing Rocket Feet ||| 1 - Enable || 0 - Disable", FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	hHomingFeet = CreateConVar("sm_homingprojectiles_feet", "1", "Enable/Disable command that toggle Homing Rocket Feet ", FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	hHomingFeet.AddChangeHook(ConVarChanged);
 	
+	hHomingSpeed = CreateConVar("sm_homingprojectiles_speed", "0.5", "The Homing Projectile speed multiplier", FCVAR_NOTIFY, true, 0.0);
+	hHomingSpeed.AddChangeHook(ConVarChanged);
+	
+	hHomingReflectSpeed = CreateConVar("sm_homingprojectiles_reflectspeed", "1.1", "The Homing Projectile reflected speed multiplier", FCVAR_NOTIFY, true, 0.0);
+	hHomingReflectSpeed.AddChangeHook(ConVarChanged);
+	
 	AutoExecConfig(true, "HomingProjectiles");
-	
-	HookEvent("teamplay_round_start", RoundStart);
-	
-	LoadTranslations("common.phrases");
 }
 
 public void OnClientPutInServer(int iClient)
 {
-	bHasHomingProjectiles[iClient] = false;
-	bHasHomingHead[iClient] = false;
-	bHasHomingFeet[iClient] = false;
+	bHasHomingProjectiles[iClient] = bHomingForAll;
+	bHasHomingHead[iClient] = bHomingForAllHead;
+	bHasHomingFeet[iClient] = bHomingForAllFeet;
 }
 
 public void OnClientDisconnect(int iClient)
 {
-	bHasHomingProjectiles[iClient] = false;
-	bHasHomingHead[iClient] = false;
-	bHasHomingFeet[iClient] = false;
+	bHasHomingProjectiles[iClient] = bHomingForAll;
+	bHasHomingHead[iClient] = bHomingForAllHead;
+	bHasHomingFeet[iClient] = bHomingForAllFeet;
 }
 
 public void OnMapStart()
@@ -100,25 +172,72 @@ public Action RoundStart(Handle hEvent, const char[] sName, bool bDontBroadcast)
 	return Plugin_Continue;
 }
 
-public void ConVarChanged(ConVar convar, const char[] oldValue, const char[] newValue)
+public void ConVarChanged(ConVar hConvar, const char[] oldValue, const char[] newValue)
 {
-	OnConfigsExecuted();
+	if(hConvar == hEnable)
+		bEnable = view_as<bool>(StringToInt(newValue));
+	
+	if(hConvar == hHomingForAll)
+	{
+		for(int iClient = 0; iClient <= MaxClients; iClient++)
+			if(IsValidClient(iClient))
+				bHasHomingProjectiles[iClient] = view_as<bool>(StringToInt(newValue));
+				
+	}
+	
+	if(hConvar == hHomingForAllHead)
+	{
+		for(int iClient = 0; iClient <= MaxClients; iClient++)
+			if(IsValidClient(iClient))
+				bHasHomingHead[iClient] = view_as<bool>(StringToInt(newValue));
+				
+	}
+	
+	if(hConvar == hHomingForAllFeet)
+	{
+		for(int iClient = 0; iClient <= MaxClients; iClient++)
+			if(IsValidClient(iClient))
+				bHasHomingFeet[iClient] = view_as<bool>(StringToInt(newValue));
+				
+	}
+	
+	if(hConvar == hCanSeeEveryone)
+		bCanSeeEveryone = view_as<bool>(StringToInt(newValue));
+	
+	if(hConvar == hHomingProjectilesMod)
+		iHomingProjectilesMod = StringToInt(newValue);
+	
+	if(hConvar == hHomingHead)
+		bHomingHead = view_as<bool>(StringToInt(newValue));
+	
+	if(hConvar == hHomingFeet)
+		bHomingFeet = view_as<bool>(StringToInt(newValue));
+	
+	if(hConvar == hHomingSpeed)
+		HOMING_SPEED_MULTIPLIER = StringToFloat(newValue);
+		
+	if(hConvar == hHomingReflectSpeed)
+		HOMING_AIRBLAST_MULTIPLIER = StringToFloat(newValue);
+		
 }
 
 public void OnConfigsExecuted()
 {
-	bEnable = GetConVarBool(hEnable);
-	bCanSeeEveryone = GetConVarBool(hCanSeeEveryone);
-	iHomingProjectilesMod = GetConVarInt(hHomingProjectilesMod);
-	bHomingHead = GetConVarBool(hHomingHead);
-	bHomingFeet = GetConVarBool(hHomingFeet);
+	bEnable = hEnable.BoolValue;
+	bHomingForAll = hHomingForAll.BoolValue;
+	bHomingForAllHead = hHomingForAllHead.BoolValue;
+	bHomingForAllFeet = hHomingForAllFeet.BoolValue;
+	bCanSeeEveryone = hCanSeeEveryone.BoolValue;
+	iHomingProjectilesMod = hHomingProjectilesMod.IntValue;
+	bHomingHead = hHomingHead.BoolValue;
+	bHomingFeet = hHomingFeet.BoolValue;
 }
 
 public Action Command_HomingProjectiles(int iClient, int iArgs)
 {
 	if(bEnable)
 	{
-		char arg1[MAX_NAME_LENGTH], arg2[32], target_name[MAX_TARGET_LENGTH];
+		char arg1[MAX_NAME_LENGTH], arg2[4], target_name[MAX_TARGET_LENGTH];
 		int target_list[MAXPLAYERS], target_count;
 		bool tn_is_ml;
 		
@@ -233,7 +352,7 @@ public Action Command_HomingHead(int iClient, int iArgs)
 	{
 		if(bHomingHead)
 		{
-			char arg1[MAX_NAME_LENGTH], arg2[32], target_name[MAX_TARGET_LENGTH];
+			char arg1[MAX_NAME_LENGTH], arg2[4], target_name[MAX_TARGET_LENGTH];
 			int target_list[MAXPLAYERS], target_count;
 			bool tn_is_ml;
 			
@@ -354,7 +473,7 @@ public Action Command_HomingFeet(int iClient, int iArgs)
 	{
 		if(bHomingFeet)
 		{
-			char arg1[MAX_NAME_LENGTH], arg2[32], target_name[MAX_TARGET_LENGTH];
+			char arg1[MAX_NAME_LENGTH], arg2[4], target_name[MAX_TARGET_LENGTH];
 			int target_list[MAXPLAYERS], target_count;
 			bool tn_is_ml;
 			
@@ -469,11 +588,82 @@ public Action Command_HomingFeet(int iClient, int iArgs)
 	return Plugin_Handled;
 }
 
+public Action Command_HomingRemoveAll(int iClient, int iArgs)
+{
+	if(bEnable)
+	{
+		char arg1[MAX_NAME_LENGTH], target_name[MAX_TARGET_LENGTH];
+		int target_list[MAXPLAYERS], target_count;
+		bool tn_is_ml;
+		
+		if(!iClient && !iArgs)
+		{
+			ReplyToCommand(iClient, "[SM] Usage in server console: sm_homingremoveall <target>\n");
+			return Plugin_Handled;
+		}
+		if(!iArgs)
+		{
+			if(bHasHomingProjectiles[iClient] || bHasHomingHead[iClient] || bHasHomingFeet[iClient])
+			{
+				bHasHomingFeet[iClient] = false;
+				bHasHomingProjectiles[iClient] = false;
+				bHasHomingHead[iClient] = false;
+				
+				ReplyToCommand(iClient, "[SM] Removed every Homing Projectiles you had");
+			}
+			else
+			{
+				ReplyToCommand(iClient, "[SM] You don't have any Homing Projectiles");
+				return Plugin_Handled;
+			}
+		}
+		else
+		{
+			GetCmdArg(1, arg1, sizeof(arg1));
+			
+			if((target_count = ProcessTargetString(arg1, iClient, target_list, MAXPLAYERS, 0, target_name, sizeof(target_name), tn_is_ml)) <= 0)
+			{
+				ReplyToTargetError(iClient, target_count);
+				return Plugin_Handled;
+			}
+			
+			for(int i = 0; i < target_count; i++)
+			{
+				int target = target_list[i];
+				
+				if(!target)
+					return Plugin_Handled;
+					
+				if(bHasHomingProjectiles[target] || bHasHomingHead[target] || bHasHomingFeet[target])
+				{
+					bHasHomingFeet[target] = false;
+					bHasHomingProjectiles[target] = false;
+					bHasHomingHead[target] = false;
+					
+					ReplyToCommand(target, "[SM] Removed every Homing Projectiles you had");
+				}
+			}
+			ShowActivity2(iClient, "[SM] ", "Removed every Homing Projectiles to %s", target_name);
+		}
+		if(iArgs > 1)
+		{
+			ReplyToCommand(iClient, "[SM] Usage: sm_homingremoveall\n[SM] Usage: sm_homingremoveall <target>");
+			return Plugin_Handled;
+		}
+	}
+	else
+	{
+		ReplyToCommand(iClient, "[SM] Cannot use the command, plugin not enabled");
+		return Plugin_Handled;
+	}
+	return Plugin_Handled;
+}
+
 public void OnEntityCreated(int iEntity, const char[] cClassname)
 {
 	if(IsValidProjectiles(cClassname) && IsHomingProjectilesPresent() && bEnable)
 		CreateTimer(0.2, CheckProjectilesOwner, EntIndexToEntRef(iEntity));
-	
+
 }
 
 public Action CheckProjectilesOwner(Handle timer, any iRefEntity)
@@ -497,7 +687,7 @@ public Action CheckProjectilesOwner(Handle timer, any iRefEntity)
 	if(!IsValidClient(iLauncher))
 		return Plugin_Stop;
 
-	if(!bHasHomingProjectiles[iLauncher])
+	if(!bHasHomingProjectiles[iLauncher] && !bHasHomingHead[iLauncher] && !bHasHomingFeet[iLauncher])
 		return Plugin_Stop;
 
 	if(GetEntProp(iProjectile, Prop_Send, "m_nForceBone") != 0)
@@ -596,7 +786,7 @@ stock bool Homing_IsValidTarget(int client, int iProjectile, int iFlags)
 	
 		if(TF2_IsPlayerInCondition(client, TFCond_Disguised) && GetEntProp(client, Prop_Send, "m_nDisguiseTeam") == iTeam)
 			return false;
-		
+
 	}
 	return CanEntitySeeTarget(iProjectile, client);
 }
@@ -642,46 +832,49 @@ stock void Homing_TurnToTarget(int client, int iProjectile, bool bSmooth=false)
 	GetEdictClassname(iProjectile, sClassname, sizeof(sClassname));
 	GetClientAbsOrigin(client, fTargetPos);
 	
-	float SpeedMultiplier = HOMING_SPEED_MULTIPLIER, 
-		AirblastSpeedMultiplier = HOMING_AIRBLAST_MULTIPLIER;
+	GetEntPropVector(iProjectile, Prop_Send, "m_vecOrigin", fRocketPos);
+	GetEntPropVector(iProjectile, Prop_Send, "m_vInitialVelocity", fInitialVelocity);
+
+	float fSpeedInit = GetVectorLength(fInitialVelocity);
+	float fSpeedBase = fSpeedInit *HOMING_SPEED_MULTIPLIER;
 	
-	if(bHomingHead) //TODO : Improve this shit.
+	if(bHomingHead) //TODO : Improve this code.
 	{
 		if(StrEqual(sClassname, "tf_projectile_arrow"))
 		{
 			if(bHasHomingHead[iLauncher])	
 			{
-				GetClientEyePosition(client, fTargetPos);
-				fTargetPos[2] -= 25;
-				//SpeedMultiplier = ;
-				//AirblastSpeedMultiplier = ;
+				//GetClientEyePosition(client, fTargetPos);
+				//fTargetPos[2] -= 25;
+				int iHead = LookupBone(client, "bip_head");
+				
+				if(iHead != 1)
+				{
+					float fNothing[3];
+					GetBonePosition(client, iHead, fTargetPos, fNothing);
+					fTargetPos[2] -= 30;
+				}
 			}
 		}
 	}
 	if(bHomingFeet)
 	{
-		if(StrEqual(sClassname, "tf_projectile_rocket") || StrEqual(sClassname, "tf_projectile_sentryrocket"))
+		if(StrEqual(sClassname, "tf_projectile_rocket") || StrEqual(sClassname, "tf_projectile_sentryrocket") || StrEqual(sClassname, "tf_projectile_energy_ball"))
 		{
-			if(StrEqual(sClassname, "tf_projectile_rocket"))
+			if(StrEqual(sClassname, "tf_projectile_rocket") || StrEqual(sClassname, "tf_projectile_energy_ball"))
 			{
 				if(bHasHomingFeet[iLauncher])
-					fTargetPos[2] -= 28;
+					fTargetPos[2] -= 30;
 			}	
 			else if(StrEqual(sClassname, "tf_projectile_sentryrocket"))
 			{
 				int iBuilder = GetEntPropEnt(iLauncher, Prop_Send, "m_hBuilder");
 				
 				if(bHasHomingFeet[iBuilder])
-					fTargetPos[2] -= 28;
+					fTargetPos[2] -= 30;
 			}
 		}
 	}
-		
-	GetEntPropVector(iProjectile, Prop_Send, "m_vecOrigin", fRocketPos);
-	GetEntPropVector(iProjectile, Prop_Send, "m_vInitialVelocity", fInitialVelocity);
-
-	float fSpeedInit = GetVectorLength(fInitialVelocity);
-	float fSpeedBase = fSpeedInit *SpeedMultiplier;
 
 	fTargetPos[2] += 30 +Pow(GetVectorDistance(fTargetPos, fRocketPos), 2.0) /10000;
 	
@@ -693,7 +886,7 @@ stock void Homing_TurnToTarget(int client, int iProjectile, bool bSmooth=false)
 	NormalizeVector(fNewVec, fNewVec);
 	GetVectorAngles(fNewVec, fAng);
 
-	float fSpeedNew = fSpeedBase +GetEntProp(iProjectile, Prop_Send, "m_iDeflected") *fSpeedBase *AirblastSpeedMultiplier;
+	float fSpeedNew = fSpeedBase +GetEntProp(iProjectile, Prop_Send, "m_iDeflected") *fSpeedBase *HOMING_AIRBLAST_MULTIPLIER;
 
 	ScaleVector(fNewVec, fSpeedNew);
 	TeleportEntity(iProjectile, NULL_VECTOR, fAng, fNewVec);
@@ -727,6 +920,15 @@ stock int GetLauncher(int iProjectile)
 		return 0;
 }
 
+stock int LookupBone(int iEntity, const char[] szName)
+{
+	return SDKCall(hHLookupBone, iEntity, szName);
+}
+
+stock void GetBonePosition(int iEntity, int iBone, float origin[3], float angles[3])
+{
+	SDKCall(hHGetBonePosition, iEntity, iBone, origin, angles);
+}
 
 	/***********OTHERS***********/
 stock bool IsValidProjectiles(const char[] sClassname)
@@ -751,8 +953,9 @@ stock bool IsHomingProjectilesPresent()
 		if(!IsValidClient(i))
 			continue;
 			
-		if(bHasHomingProjectiles[i])
+		if(bHasHomingProjectiles[i] || bHasHomingHead[i] || bHasHomingFeet[i])
 			return true;
+
 	}
 	return false;
 }
