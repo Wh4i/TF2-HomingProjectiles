@@ -1,6 +1,6 @@
 #pragma semicolon 1
 
-#define PLUGIN_VERSION "1.4.0"
+#define PLUGIN_VERSION "1.5.0"
 
 #include <sourcemod>
 #include <tf2>
