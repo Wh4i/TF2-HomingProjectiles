@@ -56,10 +56,10 @@ public void OnPluginStart()
 	hHomingProjectilesMod = CreateConVar("sm_homingprojectiles_mod", "4", "Homing Projectiles Mod ||| 0 - No Mod (no Homing Projectiles)\n1 - Target the owner\n2 - Target the real owner (for example if pyro airblast the proj. , it's the real owner and not the pyro will get the proj.)\n4 - Target enemies\n8 - Target allies\n16 - Smooth Rocket Movements (Useless alone. Also, the rocket will lose a little his precision)\nYou can have more than 1 mod by adding the value(example : 20 = 16 + 4 = Target enemies + Smooth Rocket Movements)", FCVAR_NOTIFY, true, 0.0, true, 31.0);
 	hHomingProjectilesMod.AddChangeHook(ConVarChanged);
 	
-	hHomingHead = CreateConVar("sm_homingprojectiles_head", "1", "Homing Arrow Head ||| 1 - Enable || 2 - Disable", FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	hHomingHead = CreateConVar("sm_homingprojectiles_head", "1", "Homing Arrow Head ||| 1 - Enable || 0 - Disable", FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	hHomingHead.AddChangeHook(ConVarChanged);
 	
-	hHomingFeet = CreateConVar("sm_homingprojectiles_feet", "1", "Homing Rocket Feet ||| 1 - Enable || 2 - Disable", FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	hHomingFeet = CreateConVar("sm_homingprojectiles_feet", "1", "Homing Rocket Feet ||| 1 - Enable || 0 - Disable", FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	hHomingFeet.AddChangeHook(ConVarChanged);
 	
 	AutoExecConfig(true, "HomingProjectiles");
