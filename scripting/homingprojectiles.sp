@@ -1,6 +1,6 @@
 #pragma semicolon 1
 
-#define PLUGIN_VERSION "1.5.0"
+#define PLUGIN_VERSION "1.6.0"
 
 #include <sourcemod>
 #include <tf2>
@@ -28,8 +28,6 @@ ConVar	hEnable,
 		hHomingForAllFeet, 
 		hCanSeeEveryone, 
 		hHomingProjectilesMod, 
-		hHomingHead, 
-		hHomingFeet, 
 		hHomingSpeed, 
 		hHomingReflectSpeed;
 		
@@ -37,16 +35,11 @@ bool		bEnable,
 		bHomingForAll, 
 		bHomingForAllHead, 
 		bHomingForAllFeet, 
-		bCanSeeEveryone, 
-		bHomingHead, 
-		bHomingFeet;
+		bCanSeeEveryone;
 		
-float		HOMING_SPEED_MULTIPLIER = 0.5, 
-		HOMING_AIRBLAST_MULTIPLIER = 1.1;
+float		fHomProjSpeedMult = 0.5, 
+		fHomProjReflSpeedMult = 1.1;
 /**********************************************/
-		
-/*#define HOMING_SPEED_MULTIPLIER 0.5		UPDATED !!!!!!
-#define HOMING_AIRBLAST_MULTIPLIER 1.1*/	
 	
 int iHomingProjectilesMod;
 ArrayList hArrayHomingProjectile = null;
@@ -65,8 +58,6 @@ public void OnPluginStart()
 {
 	RegisterCmds();
 	RegisterCvars();
-	
-	AutoExecConfig(true, "HomingProjectiles");
 	
 	HookEvent("teamplay_round_start", RoundStart);
 	
@@ -125,12 +116,6 @@ void RegisterCvars()
 	
 	hHomingProjectilesMod = CreateConVar("sm_homingprojectiles_mod", "4", "Homing Projectiles Mod ||| 0 - No Mod (no Homing Projectiles)\n1 - Target the owner\n2 - Target the real owner (for example if pyro airblast the proj. , it's the real owner and not the pyro will get the proj.)\n4 - Target enemies\n8 - Target allies\n16 - Smooth Rocket Movements (Useless alone. Also, the rocket will lose a little his precision)\nYou can have more than 1 mod by adding the value(example : 20 = 16 + 4 = Target enemies + Smooth Rocket Movements)", FCVAR_NOTIFY, true, 0.0, true, 31.0);
 	hHomingProjectilesMod.AddChangeHook(ConVarChanged);
-	
-	hHomingHead = CreateConVar("sm_homingprojectiles_head", "1", "Enable/Disable command that toggle Homing Arrow Head ", FCVAR_NOTIFY, true, 0.0, true, 1.0);
-	hHomingHead.AddChangeHook(ConVarChanged);
-	
-	hHomingFeet = CreateConVar("sm_homingprojectiles_feet", "1", "Enable/Disable command that toggle Homing Rocket Feet ", FCVAR_NOTIFY, true, 0.0, true, 1.0);
-	hHomingFeet.AddChangeHook(ConVarChanged);
 	
 	hHomingSpeed = CreateConVar("sm_homingprojectiles_speed", "0.5", "The Homing Projectile speed multiplier", FCVAR_NOTIFY, true, 0.0);
 	hHomingSpeed.AddChangeHook(ConVarChanged);
@@ -207,17 +192,11 @@ public void ConVarChanged(ConVar hConvar, const char[] oldValue, const char[] ne
 	if(hConvar == hHomingProjectilesMod)
 		iHomingProjectilesMod = StringToInt(newValue);
 	
-	if(hConvar == hHomingHead)
-		bHomingHead = view_as<bool>(StringToInt(newValue));
-	
-	if(hConvar == hHomingFeet)
-		bHomingFeet = view_as<bool>(StringToInt(newValue));
-	
 	if(hConvar == hHomingSpeed)
-		HOMING_SPEED_MULTIPLIER = StringToFloat(newValue);
+		fHomProjSpeedMult = StringToFloat(newValue);
 		
 	if(hConvar == hHomingReflectSpeed)
-		HOMING_AIRBLAST_MULTIPLIER = StringToFloat(newValue);
+		fHomProjReflSpeedMult = StringToFloat(newValue);
 		
 }
 
@@ -229,8 +208,6 @@ public void OnConfigsExecuted()
 	bHomingForAllFeet = hHomingForAllFeet.BoolValue;
 	bCanSeeEveryone = hCanSeeEveryone.BoolValue;
 	iHomingProjectilesMod = hHomingProjectilesMod.IntValue;
-	bHomingHead = hHomingHead.BoolValue;
-	bHomingFeet = hHomingFeet.BoolValue;
 }
 
 public Action Command_HomingProjectiles(int iClient, int iArgs)
@@ -275,7 +252,7 @@ public Action Command_HomingProjectiles(int iClient, int iArgs)
 				int target = target_list[i];
 				
 				if(!target)
-					return Plugin_Handled;
+					continue;
 				
 				if(!bHasHomingProjectiles[target])
 				{
@@ -306,7 +283,7 @@ public Action Command_HomingProjectiles(int iClient, int iArgs)
 				int target = target_list[i];
 				
 				if(!target)
-					return Plugin_Handled;
+					continue;
 				
 				if(StrEqual(arg2, "on", false) || StrEqual(arg2, "1", false))
 				{
@@ -350,112 +327,104 @@ public Action Command_HomingHead(int iClient, int iArgs)
 {
 	if(bEnable)
 	{
-		if(bHomingHead)
+		char arg1[MAX_NAME_LENGTH], arg2[4], target_name[MAX_TARGET_LENGTH];
+		int target_list[MAXPLAYERS], target_count;
+		bool tn_is_ml;
+		
+		if(!iClient && !iArgs)
 		{
-			char arg1[MAX_NAME_LENGTH], arg2[4], target_name[MAX_TARGET_LENGTH];
-			int target_list[MAXPLAYERS], target_count;
-			bool tn_is_ml;
-			
-			if(!iClient && !iArgs)
+			ReplyToCommand(iClient, "[SM] Usage in server console: sm_homingarrowhead <target>\n[SM] Usage in server console: sm_homingarrowhead <target> <1 - enable | 0 - disable>");
+			return Plugin_Handled;
+		}
+		if(!iArgs)
+		{
+			if(bHasHomingHead[iClient])
 			{
-				ReplyToCommand(iClient, "[SM] Usage in server console: sm_homingarrowhead <target>\n[SM] Usage in server console: sm_homingarrowhead <target> <1 - enable | 0 - disable>");
+				bHasHomingHead[iClient] = false;
+				ReplyToCommand(iClient, "[SM] Homing Arrow Head is now disabled to you");
+			}
+			else
+			{
+				bHasHomingHead[iClient] = true;
+				ReplyToCommand(iClient, "[SM] Homing Arrow Head is now enabled to you");
+			}
+		}
+		if(iArgs == 1)
+		{
+			
+			GetCmdArg(1, arg1, sizeof(arg1));
+			
+			if((target_count = ProcessTargetString(arg1, iClient, target_list, MAXPLAYERS, 0, target_name, sizeof(target_name), tn_is_ml)) <= 0)
+			{
+				ReplyToTargetError(iClient, target_count);
 				return Plugin_Handled;
 			}
-			if(!iArgs)
+			
+			for(int i = 0; i < target_count; i++)
 			{
-				if(bHasHomingHead[iClient])
+				int target = target_list[i];
+				
+				if(!target)
+					continue;
+					
+				if(!bHasHomingHead[target])
 				{
-					bHasHomingHead[iClient] = false;
-					ReplyToCommand(iClient, "[SM] Homing Arrow Head is now disabled to you");
+					bHasHomingHead[target] = true;
+					ReplyToCommand(target, "[SM] Homing Arrow Head is now enabled to you");
 				}
 				else
 				{
-					bHasHomingHead[iClient] = true;
-					ReplyToCommand(iClient, "[SM] Homing Arrow Head is now enabled to you");
+					bHasHomingHead[target] = false;
+					ReplyToCommand(target, "[SM] Homing Arrow Head is now disabled to you");
 				}
 			}
-			if(iArgs == 1)
+			ShowActivity2(iClient, "[SM] ", "Toggled Homing Arrow Head for %s", target_name);
+		}
+		if(iArgs == 2)
+		{
+			GetCmdArg(1, arg1, sizeof(arg1));
+			GetCmdArg(2, arg2, sizeof(arg2));
+			
+			if((target_count = ProcessTargetString(arg1, iClient, target_list, MAXPLAYERS, 0, target_name, sizeof(target_name), tn_is_ml)) <= 0)
 			{
-				
-				GetCmdArg(1, arg1, sizeof(arg1));
-				
-				if((target_count = ProcessTargetString(arg1, iClient, target_list, MAXPLAYERS, 0, target_name, sizeof(target_name), tn_is_ml)) <= 0)
-				{
-					ReplyToTargetError(iClient, target_count);
-					return Plugin_Handled;
-				}
-				
-				for(int i = 0; i < target_count; i++)
-				{
-					int target = target_list[i];
-					
-					if(!target)
-						return Plugin_Handled;
-					
-					if(!bHasHomingHead[target])
-					{
-						bHasHomingHead[target] = true;
-						ReplyToCommand(target, "[SM] Homing Arrow Head is now enabled to you");
-					}
-					else
-					{
-						bHasHomingHead[target] = false;
-						ReplyToCommand(target, "[SM] Homing Arrow Head is now disabled to you");
-					}
-				}
-				ShowActivity2(iClient, "[SM] ", "Toggled Homing Arrow Head for %s", target_name);
+				ReplyToTargetError(iClient, target_count);
+				return Plugin_Handled;
 			}
-			if(iArgs == 2)
+			
+			for(int i = 0; i < target_count; i++)
 			{
-				GetCmdArg(1, arg1, sizeof(arg1));
-				GetCmdArg(2, arg2, sizeof(arg2));
+				int target = target_list[i];
 				
-				if((target_count = ProcessTargetString(arg1, iClient, target_list, MAXPLAYERS, 0, target_name, sizeof(target_name), tn_is_ml)) <= 0)
-				{
-					ReplyToTargetError(iClient, target_count);
-					return Plugin_Handled;
-				}
-				
-				for(int i = 0; i < target_count; i++)
-				{
-					int target = target_list[i];
+				if(!target)
+					continue;
 					
-					if(!target)
-						return Plugin_Handled;
-					
-					if(StrEqual(arg2, "on", false) || StrEqual(arg2, "1", false))
-					{
-						if(!bHasHomingHead[target])
-							ReplyToCommand(target, "[SM] Homing Arroww Head is now enabled to you");
-							
-						bHasHomingHead[target] = true;	
-					}
-					else if(StrEqual(arg2, "off", false) || StrEqual(arg2, "0", false))
-					{
-						if(bHasHomingHead[target])
-							ReplyToCommand(target, "[SM] Homing Arrow Head is now disabled to you");
-						
-						bHasHomingHead[target] = false;
-					}
-				}
 				if(StrEqual(arg2, "on", false) || StrEqual(arg2, "1", false))
 				{
-					ShowActivity2(iClient, "[SM] ", "Homing Arrow Head is enabled to %s", target_name);
+					if(!bHasHomingHead[target])
+						ReplyToCommand(target, "[SM] Homing Arroww Head is now enabled to you");
+						
+					bHasHomingHead[target] = true;	
 				}
 				else if(StrEqual(arg2, "off", false) || StrEqual(arg2, "0", false))
 				{
-					ShowActivity2(iClient, "[SM] ", "Homing Arrow Head is disabled to %s", target_name);
+					if(bHasHomingHead[target])
+						ReplyToCommand(target, "[SM] Homing Arrow Head is now disabled to you");
+					
+					bHasHomingHead[target] = false;
 				}
 			}
-			if(iArgs > 2)
+			if(StrEqual(arg2, "on", false) || StrEqual(arg2, "1", false))
 			{
-				ReplyToCommand(iClient, "[SM] Usage: sm_homingarrowhead\n[SM] Usage: sm_homingarrowhead <target>\n[SM] Usage: sm_homingarrowhead <target> <1 - enable | 0 - disable>");
-				return Plugin_Handled;
+				ShowActivity2(iClient, "[SM] ", "Homing Arrow Head is enabled to %s", target_name);
+			}
+			else if(StrEqual(arg2, "off", false) || StrEqual(arg2, "0", false))
+			{
+				ShowActivity2(iClient, "[SM] ", "Homing Arrow Head is disabled to %s", target_name);
 			}
 		}
-		else
+		if(iArgs > 2)
 		{
-			ReplyToCommand(iClient, "[SM] Cannot use the command, the owner disabled this function");
+			ReplyToCommand(iClient, "[SM] Usage: sm_homingarrowhead\n[SM] Usage: sm_homingarrowhead <target>\n[SM] Usage: sm_homingarrowhead <target> <1 - enable | 0 - disable>");
 			return Plugin_Handled;
 		}
 	}
@@ -471,112 +440,104 @@ public Action Command_HomingFeet(int iClient, int iArgs)
 {
 	if(bEnable)
 	{
-		if(bHomingFeet)
+		char arg1[MAX_NAME_LENGTH], arg2[4], target_name[MAX_TARGET_LENGTH];
+		int target_list[MAXPLAYERS], target_count;
+		bool tn_is_ml;
+		
+		if(!iClient && !iArgs)
 		{
-			char arg1[MAX_NAME_LENGTH], arg2[4], target_name[MAX_TARGET_LENGTH];
-			int target_list[MAXPLAYERS], target_count;
-			bool tn_is_ml;
-			
-			if(!iClient && !iArgs)
+			ReplyToCommand(iClient, "[SM] Usage in server console: sm_homingrocketfeet <target>\n[SM] Usage in server console: sm_homingrocketfeet <target> <1 - enable | 0 - disable>");
+			return Plugin_Handled;
+		}
+		if(!iArgs)
+		{
+			if(bHasHomingFeet[iClient])
 			{
-				ReplyToCommand(iClient, "[SM] Usage in server console: sm_homingrocketfeet <target>\n[SM] Usage in server console: sm_homingrocketfeet <target> <1 - enable | 0 - disable>");
+				bHasHomingFeet[iClient] = false;
+				ReplyToCommand(iClient, "[SM] Homing Rocket Feet is now disabled to you");
+			}
+			else
+			{
+				bHasHomingFeet[iClient] = true;
+				ReplyToCommand(iClient, "[SM] Homing Rocket Feet is now enabled to you");
+			}
+		}
+		if(iArgs == 1)
+		{
+			
+			GetCmdArg(1, arg1, sizeof(arg1));
+			
+			if((target_count = ProcessTargetString(arg1, iClient, target_list, MAXPLAYERS, 0, target_name, sizeof(target_name), tn_is_ml)) <= 0)
+			{
+				ReplyToTargetError(iClient, target_count);
 				return Plugin_Handled;
 			}
-			if(!iArgs)
+			
+			for(int i = 0; i < target_count; i++)
 			{
-				if(bHasHomingFeet[iClient])
+				int target = target_list[i];
+				
+				if(!target)
+					continue;
+					
+				if(!bHasHomingFeet[target])
 				{
-					bHasHomingFeet[iClient] = false;
-					ReplyToCommand(iClient, "[SM] Homing Rocket Feet is now disabled to you");
+					bHasHomingFeet[target] = true;
+					ReplyToCommand(target, "[SM] Homing Rocket Feet is now enabled to you");
 				}
 				else
 				{
-					bHasHomingFeet[iClient] = true;
-					ReplyToCommand(iClient, "[SM] Homing Rocket Feet is now enabled to you");
+					bHasHomingFeet[target] = false;
+					ReplyToCommand(target, "[SM] Homing Rocket Feet is now disabled to you");
 				}
 			}
-			if(iArgs == 1)
+			ShowActivity2(iClient, "[SM] ", "Toggled Homing Rocket Feet for %s", target_name);
+		}
+		if(iArgs == 2)
+		{
+			GetCmdArg(1, arg1, sizeof(arg1));
+			GetCmdArg(2, arg2, sizeof(arg2));
+			
+			if((target_count = ProcessTargetString(arg1, iClient, target_list, MAXPLAYERS, 0, target_name, sizeof(target_name), tn_is_ml)) <= 0)
 			{
-				
-				GetCmdArg(1, arg1, sizeof(arg1));
-				
-				if((target_count = ProcessTargetString(arg1, iClient, target_list, MAXPLAYERS, 0, target_name, sizeof(target_name), tn_is_ml)) <= 0)
-				{
-					ReplyToTargetError(iClient, target_count);
-					return Plugin_Handled;
-				}
-				
-				for(int i = 0; i < target_count; i++)
-				{
-					int target = target_list[i];
-					
-					if(!target)
-						return Plugin_Handled;
-					
-					if(!bHasHomingFeet[target])
-					{
-						bHasHomingFeet[target] = true;
-						ReplyToCommand(target, "[SM] Homing Rocket Feet is now enabled to you");
-					}
-					else
-					{
-						bHasHomingFeet[target] = false;
-						ReplyToCommand(target, "[SM] Homing Rocket Feet is now disabled to you");
-					}
-				}
-				ShowActivity2(iClient, "[SM] ", "Toggled Homing Rocket Feet for %s", target_name);
+				ReplyToTargetError(iClient, target_count);
+				return Plugin_Handled;
 			}
-			if(iArgs == 2)
+			
+			for(int i = 0; i < target_count; i++)
 			{
-				GetCmdArg(1, arg1, sizeof(arg1));
-				GetCmdArg(2, arg2, sizeof(arg2));
+				int target = target_list[i];
 				
-				if((target_count = ProcessTargetString(arg1, iClient, target_list, MAXPLAYERS, 0, target_name, sizeof(target_name), tn_is_ml)) <= 0)
-				{
-					ReplyToTargetError(iClient, target_count);
-					return Plugin_Handled;
-				}
+				if(!target)
+					continue;
 				
-				for(int i = 0; i < target_count; i++)
-				{
-					int target = target_list[i];
-					
-					if(!target)
-						return Plugin_Handled;
-					
-					if(StrEqual(arg2, "on", false) || StrEqual(arg2, "1", false))
-					{
-						if(!bHasHomingFeet[target])
-							ReplyToCommand(target, "[SM] Homing Rocket Feet is now enabled to you");
-							
-						bHasHomingFeet[target] = true;	
-					}
-					else if(StrEqual(arg2, "off", false) || StrEqual(arg2, "0", false))
-					{
-						if(bHasHomingFeet[target])
-							ReplyToCommand(target, "[SM] Homing Rocket Feet is now disabled to you");
-						
-						bHasHomingFeet[target] = false;
-					}
-				}
 				if(StrEqual(arg2, "on", false) || StrEqual(arg2, "1", false))
 				{
-					ShowActivity2(iClient, "[SM] ", "Homing Rocket Feet is enabled to %s", target_name);
+					if(!bHasHomingFeet[target])
+						ReplyToCommand(target, "[SM] Homing Rocket Feet is now enabled to you");
+						
+					bHasHomingFeet[target] = true;	
 				}
 				else if(StrEqual(arg2, "off", false) || StrEqual(arg2, "0", false))
 				{
-					ShowActivity2(iClient, "[SM] ", "Homing Rocket Feet is disabled to %s", target_name);
+					if(bHasHomingFeet[target])
+						ReplyToCommand(target, "[SM] Homing Rocket Feet is now disabled to you");
+					
+					bHasHomingFeet[target] = false;
 				}
 			}
-			if(iArgs > 2)
+			if(StrEqual(arg2, "on", false) || StrEqual(arg2, "1", false))
 			{
-				ReplyToCommand(iClient, "[SM] Usage: sm_homingrocketfeet\n[SM] Usage: sm_homingrocketfeet <target>\n[SM] Usage: sm_homingrocketfeet <target> <1 - enable | 0 - disable>");
-				return Plugin_Handled;
+				ShowActivity2(iClient, "[SM] ", "Homing Rocket Feet is enabled to %s", target_name);
+			}
+			else if(StrEqual(arg2, "off", false) || StrEqual(arg2, "0", false))
+			{
+				ShowActivity2(iClient, "[SM] ", "Homing Rocket Feet is disabled to %s", target_name);
 			}
 		}
-		else
+		if(iArgs > 2)
 		{
-			ReplyToCommand(iClient, "[SM] Cannot use the command, the owner disabled this function");
+			ReplyToCommand(iClient, "[SM] Usage: sm_homingrocketfeet\n[SM] Usage: sm_homingrocketfeet <target>\n[SM] Usage: sm_homingrocketfeet <target> <1 - enable | 0 - disable>");
 			return Plugin_Handled;
 		}
 	}
@@ -632,7 +593,7 @@ public Action Command_HomingRemoveAll(int iClient, int iArgs)
 				int target = target_list[i];
 				
 				if(!target)
-					return Plugin_Handled;
+					continue;
 					
 				if(bHasHomingProjectiles[target] || bHasHomingHead[target] || bHasHomingFeet[target])
 				{
@@ -836,43 +797,37 @@ stock void Homing_TurnToTarget(int client, int iProjectile, bool bSmooth=false)
 	GetEntPropVector(iProjectile, Prop_Send, "m_vInitialVelocity", fInitialVelocity);
 
 	float fSpeedInit = GetVectorLength(fInitialVelocity);
-	float fSpeedBase = fSpeedInit *HOMING_SPEED_MULTIPLIER;
-	
-	if(bHomingHead) //TODO : Improve this code.
+	float fSpeedBase = fSpeedInit * fHomProjSpeedMult;
+	 //TODO : Improve this code.
+	if(StrEqual(sClassname, "tf_projectile_arrow"))
 	{
-		if(StrEqual(sClassname, "tf_projectile_arrow"))
+		if(bHasHomingHead[iLauncher])	
 		{
-			if(bHasHomingHead[iLauncher])	
+			//GetClientEyePosition(client, fTargetPos);
+			//fTargetPos[2] -= 25;
+			int iHead = LookupBone(client, "bip_head");
+			
+			if(iHead != 1)
 			{
-				//GetClientEyePosition(client, fTargetPos);
-				//fTargetPos[2] -= 25;
-				int iHead = LookupBone(client, "bip_head");
-				
-				if(iHead != 1)
-				{
-					float fNothing[3];
-					GetBonePosition(client, iHead, fTargetPos, fNothing);
-					fTargetPos[2] -= 30;
-				}
+				float fNothing[3];
+				GetBonePosition(client, iHead, fTargetPos, fNothing);
+				fTargetPos[2] -= 30;
 			}
 		}
 	}
-	if(bHomingFeet)
+	else if(StrEqual(sClassname, "tf_projectile_rocket") || StrEqual(sClassname, "tf_projectile_sentryrocket") || StrEqual(sClassname, "tf_projectile_energy_ball"))
 	{
-		if(StrEqual(sClassname, "tf_projectile_rocket") || StrEqual(sClassname, "tf_projectile_sentryrocket") || StrEqual(sClassname, "tf_projectile_energy_ball"))
+		if(StrEqual(sClassname, "tf_projectile_rocket") || StrEqual(sClassname, "tf_projectile_energy_ball"))
 		{
-			if(StrEqual(sClassname, "tf_projectile_rocket") || StrEqual(sClassname, "tf_projectile_energy_ball"))
-			{
-				if(bHasHomingFeet[iLauncher])
-					fTargetPos[2] -= 30;
-			}	
-			else if(StrEqual(sClassname, "tf_projectile_sentryrocket"))
-			{
-				int iBuilder = GetEntPropEnt(iLauncher, Prop_Send, "m_hBuilder");
-				
-				if(bHasHomingFeet[iBuilder])
-					fTargetPos[2] -= 30;
-			}
+			if(bHasHomingFeet[iLauncher])
+				fTargetPos[2] -= 30;
+		}	
+		else if(StrEqual(sClassname, "tf_projectile_sentryrocket"))
+		{
+			int iBuilder = GetEntPropEnt(iLauncher, Prop_Send, "m_hBuilder");
+			
+			if(bHasHomingFeet[iBuilder])
+				fTargetPos[2] -= 30;
 		}
 	}
 
@@ -886,7 +841,7 @@ stock void Homing_TurnToTarget(int client, int iProjectile, bool bSmooth=false)
 	NormalizeVector(fNewVec, fNewVec);
 	GetVectorAngles(fNewVec, fAng);
 
-	float fSpeedNew = fSpeedBase +GetEntProp(iProjectile, Prop_Send, "m_iDeflected") *fSpeedBase *HOMING_AIRBLAST_MULTIPLIER;
+	float fSpeedNew = fSpeedBase +GetEntProp(iProjectile, Prop_Send, "m_iDeflected") * fSpeedBase * fHomProjReflSpeedMult;
 
 	ScaleVector(fNewVec, fSpeedNew);
 	TeleportEntity(iProjectile, NULL_VECTOR, fAng, fNewVec);
