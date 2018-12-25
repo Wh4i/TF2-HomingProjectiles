@@ -1,6 +1,6 @@
 #pragma semicolon 1
 
-#define PLUGIN_VERSION "1.6.0"
+#define PLUGIN_VERSION "1.6.5"
 
 #include <sourcemod>
 #include <tf2>
@@ -35,7 +35,7 @@ bool		bEnable,
 		bHomingForAll, 
 		bHomingForAllHead, 
 		bHomingForAllFeet, 
-		bCanSeeEveryone;
+		bCanSeeEveryone; 
 		
 float		fHomProjSpeedMult = 0.5, 
 		fHomProjReflSpeedMult = 1.1;
@@ -208,6 +208,8 @@ public void OnConfigsExecuted()
 	bHomingForAllFeet = hHomingForAllFeet.BoolValue;
 	bCanSeeEveryone = hCanSeeEveryone.BoolValue;
 	iHomingProjectilesMod = hHomingProjectilesMod.IntValue;
+	fHomProjSpeedMult = hHomingSpeed.FloatValue;
+	fHomProjReflSpeedMult = hHomingReflectSpeed.FloatValue;
 }
 
 public Action Command_HomingProjectiles(int iClient, int iArgs)
@@ -366,7 +368,7 @@ public Action Command_HomingHead(int iClient, int iArgs)
 				
 				if(!target)
 					continue;
-					
+				
 				if(!bHasHomingHead[target])
 				{
 					bHasHomingHead[target] = true;
@@ -397,7 +399,7 @@ public Action Command_HomingHead(int iClient, int iArgs)
 				
 				if(!target)
 					continue;
-					
+				
 				if(StrEqual(arg2, "on", false) || StrEqual(arg2, "1", false))
 				{
 					if(!bHasHomingHead[target])
@@ -464,7 +466,7 @@ public Action Command_HomingFeet(int iClient, int iArgs)
 		}
 		if(iArgs == 1)
 		{
-			
+				
 			GetCmdArg(1, arg1, sizeof(arg1));
 			
 			if((target_count = ProcessTargetString(arg1, iClient, target_list, MAXPLAYERS, 0, target_name, sizeof(target_name), tn_is_ml)) <= 0)
@@ -479,7 +481,7 @@ public Action Command_HomingFeet(int iClient, int iArgs)
 				
 				if(!target)
 					continue;
-					
+				
 				if(!bHasHomingFeet[target])
 				{
 					bHasHomingFeet[target] = true;
@@ -686,9 +688,9 @@ public void OnGameFrame()
 	}
 }
 
-/*****STOCKS HOMING PROJECTILES*****/
+/*****HOMING PROJECTILES CORE*****/
 
-stock void Homing_Push(int iProjectile, int iFlags=HOMING_ENEMIES)
+void Homing_Push(int iProjectile, int iFlags=HOMING_ENEMIES)
 {
 	int iData[3];
 	iData[0] = EntIndexToEntRef(iProjectile);
@@ -696,7 +698,7 @@ stock void Homing_Push(int iProjectile, int iFlags=HOMING_ENEMIES)
 	hArrayHomingProjectile.PushArray(iData);
 }
 
-stock void Homing_Think(int iProjectile, int iRefProjectile, int iArrayIndex, int iCurrentTarget, int iFlags)
+void Homing_Think(int iProjectile, int iRefProjectile, int iArrayIndex, int iCurrentTarget, int iFlags)
 {
 	if(!Homing_IsValidTarget(iCurrentTarget, iProjectile, iFlags))
 		Homing_FindTarget(iProjectile, iRefProjectile, iArrayIndex, iFlags);
@@ -752,7 +754,7 @@ stock bool Homing_IsValidTarget(int client, int iProjectile, int iFlags)
 	return CanEntitySeeTarget(iProjectile, client);
 }
 
-stock void Homing_FindTarget(int iProjectile, int iRefProjectile, int iArrayIndex, int iFlags)
+void Homing_FindTarget(int iProjectile, int iRefProjectile, int iArrayIndex, int iFlags)
 {
 	float fPos[3], fPosOther[3];
 	GetEntPropVector(iProjectile, Prop_Send, "m_vecOrigin", fPos);
@@ -784,25 +786,23 @@ stock void Homing_FindTarget(int iProjectile, int iRefProjectile, int iArrayInde
 		Homing_TurnToTarget(iBestTarget, iProjectile, view_as<bool>(iFlags & HOMING_SMOOTH));
 }
 
-stock void Homing_TurnToTarget(int client, int iProjectile, bool bSmooth=false)
+stock Action Homing_TurnToTarget(int client, int iProjectile, bool bSmooth=false)
 {
 	char sClassname[32];
 	float fTargetPos[3], fRocketPos[3], fInitialVelocity[3];
-	int iLauncher = GetEntPropEnt(iProjectile, Prop_Send, "m_hOwnerEntity");
 	
 	GetEdictClassname(iProjectile, sClassname, sizeof(sClassname));
 	GetClientAbsOrigin(client, fTargetPos);
 	
-	GetEntPropVector(iProjectile, Prop_Send, "m_vecOrigin", fRocketPos);
-	GetEntPropVector(iProjectile, Prop_Send, "m_vInitialVelocity", fInitialVelocity);
-
-	float fSpeedInit = GetVectorLength(fInitialVelocity);
-	float fSpeedBase = fSpeedInit * fHomProjSpeedMult;
-	 //TODO : Improve this code.
-	if(StrEqual(sClassname, "tf_projectile_arrow"))
+	int iLauncher = GetEntPropEnt(iProjectile, Prop_Send, "m_hOwnerEntity");
+	
+	if(StrEqual(sClassname, "tf_projectile_sentryrocket"))
+		iLauncher = GetEntPropEnt(iLauncher, Prop_Send, "m_hBuilder");
+	
+	if(StrEqual(sClassname, "tf_projectile_arrow"))//TODO : Improve this code.
 	{
 		if(bHasHomingHead[iLauncher])	
-		{
+		{	
 			//GetClientEyePosition(client, fTargetPos);
 			//fTargetPos[2] -= 25;
 			int iHead = LookupBone(client, "bip_head");
@@ -814,23 +814,29 @@ stock void Homing_TurnToTarget(int client, int iProjectile, bool bSmooth=false)
 				fTargetPos[2] -= 30;
 			}
 		}
+		else if(!bHasHomingProjectiles[iLauncher])
+			return Plugin_Stop;
 	}
 	else if(StrEqual(sClassname, "tf_projectile_rocket") || StrEqual(sClassname, "tf_projectile_sentryrocket") || StrEqual(sClassname, "tf_projectile_energy_ball"))
 	{
-		if(StrEqual(sClassname, "tf_projectile_rocket") || StrEqual(sClassname, "tf_projectile_energy_ball"))
-		{
-			if(bHasHomingFeet[iLauncher])
-				fTargetPos[2] -= 30;
-		}	
-		else if(StrEqual(sClassname, "tf_projectile_sentryrocket"))
-		{
-			int iBuilder = GetEntPropEnt(iLauncher, Prop_Send, "m_hBuilder");
+		if(bHasHomingFeet[iLauncher])
+			fTargetPos[2] -= 30;
 			
-			if(bHasHomingFeet[iBuilder])
-				fTargetPos[2] -= 30;
-		}
+		else if(!bHasHomingProjectiles[iLauncher])
+			return Plugin_Stop;
+	}
+	else
+	{
+		if(!bHasHomingProjectiles[iLauncher])
+			return Plugin_Stop;
 	}
 
+	GetEntPropVector(iProjectile, Prop_Send, "m_vecOrigin", fRocketPos);
+	GetEntPropVector(iProjectile, Prop_Send, "m_vInitialVelocity", fInitialVelocity);
+
+	float fSpeedInit = GetVectorLength(fInitialVelocity);
+	float fSpeedBase = fSpeedInit * fHomProjSpeedMult;
+	
 	fTargetPos[2] += 30 +Pow(GetVectorDistance(fTargetPos, fRocketPos), 2.0) /10000;
 	
 	if(bSmooth)
@@ -845,9 +851,11 @@ stock void Homing_TurnToTarget(int client, int iProjectile, bool bSmooth=false)
 
 	ScaleVector(fNewVec, fSpeedNew);
 	TeleportEntity(iProjectile, NULL_VECTOR, fAng, fNewVec);
+	
+	return Plugin_Continue;
 }
 
-stock void Homing_SmoothTurn(float fTargetPos[3], float fRocketPos[3], int iProjectile)
+void Homing_SmoothTurn(float fTargetPos[3], float fRocketPos[3], int iProjectile)
 {
 	float fDist = GetVectorDistance(fRocketPos, fTargetPos);
 
